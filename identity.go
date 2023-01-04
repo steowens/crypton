@@ -1,6 +1,7 @@
 package crypton
 
 import (
+	"crypto/ecdsa"
 	"encoding/hex"
 	"fmt"
 
@@ -29,6 +30,29 @@ func (profile *PublicProfile) Hashable() (hashable string) {
 type Registration struct {
 	Profile   PublicProfile
 	Signature string
+}
+
+func (registration *Registration) GetPublicKey() (pubKey *ecdsa.PublicKey, err error) {
+	hashable := registration.Profile.Hashable()
+	signature, err := hex.DecodeString(registration.Signature)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	pubKey, err = GetPublicKeyFromSignature(hashable, signature)
+	if err != nil {
+		log.Error(err)
+	}
+	return
+}
+
+func (registration *Registration) GetAddress() (address string, err error) {
+	pubKey, err := registration.GetPublicKey()
+	if err != nil {
+		return
+	}
+	address = GetAddressFromPublicKey(pubKey)
+	return
 }
 
 func NewIdentity(publicName string, domain string, url string, port int16, password string) (ident *Identity, err error) {

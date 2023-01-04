@@ -4,7 +4,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/crypto"
 	gcrypt "github.com/ethereum/go-ethereum/crypto"
 	log "github.com/sirupsen/logrus"
 )
@@ -73,7 +72,29 @@ func (sk *SigningKey) Sign(message []byte) (signature []byte, err error) {
 		err = fmt.Errorf("Signing key is still locked.")
 		return
 	}
-	theHash := crypto.Keccak512(message)
-	signature, err = crypto.Sign(theHash, sk.privateKey)
+	digest := gcrypt.Keccak256(message)
+	signature, err = gcrypt.Sign(digest, sk.privateKey)
 	return
+}
+
+func (sk *SigningKey) GetAddress() (address string, err error) {
+	if sk.locked == true {
+		err = fmt.Errorf("Signing key is locked")
+		return
+	}
+	addr := gcrypt.PubkeyToAddress(sk.privateKey.PublicKey)
+	address = addr.String()
+	return
+}
+
+func GetPublicKeyFromSignature(hashable string, signature []byte) (pubKey *ecdsa.PublicKey, err error) {
+	message := []byte(hashable)
+	digest := gcrypt.Keccak256(message)
+	pubKey, err = gcrypt.SigToPub(digest, signature)
+	return
+}
+
+func GetAddressFromPublicKey(pubKey *ecdsa.PublicKey) string {
+	addr := gcrypt.PubkeyToAddress(*pubKey)
+	return addr.String()
 }

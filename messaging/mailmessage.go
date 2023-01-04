@@ -1,4 +1,4 @@
-package crypton
+package messaging
 
 import (
 	"bytes"
