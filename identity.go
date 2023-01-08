@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	uuid "github.com/satori/go.uuid"
 	log "github.com/sirupsen/logrus"
@@ -20,6 +21,17 @@ type PublicProfile struct {
 	ID         string
 	PublicName string
 	Domain     string
+}
+
+func (profile *PublicProfile) Valid() bool {
+	if strings.ContainsAny(profile.Domain, "[]:()@") {
+		return false
+	}
+	if strings.ContainsAny(profile.PublicName, "[]:()@") {
+		return false
+	}
+	_, err := uuid.FromString(profile.ID)
+	return err == nil
 }
 
 func (profile *PublicProfile) Hashable() (hashable string) {

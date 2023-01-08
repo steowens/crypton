@@ -23,13 +23,13 @@ const (
 )
 
 type ConnectionRequest struct {
-	AddressTo string
+	ConnectTo crypton.PublicProfile
 	Requester crypton.Registration
 	Signature string
 }
 
 func (req *ConnectionRequest) Hashable() (hashable string) {
-	hashable = fmt.Sprintf("ConnectionRequest[%s(%s)::%s]", req.Requester.Profile.Hashable(), req.Requester.Signature, req.AddressTo)
+	hashable = fmt.Sprintf("ConnectionRequest[%s(%s)::%s]", req.Requester.Profile.Hashable(), req.Requester.Signature, req.ConnectTo.Hashable())
 	return
 }
 
@@ -69,13 +69,13 @@ func (resp *ConnectionResponse) Sign(key *crypton.SigningKey) (err error) {
 }
 
 type KeyAgreementRequest struct {
-	RequesterKaKey   string
-	RequesterAddress string
-	Signature        string
+	RequesterKaKey string
+	Requester      crypton.Registration
+	Signature      string
 }
 
 func (kagReq *KeyAgreementRequest) Hashable() string {
-	return fmt.Sprintf("KeyAgreementRequest[%s::%s]", kagReq.RequesterKaKey, kagReq.RequesterAddress)
+	return fmt.Sprintf("KeyAgreementRequest[%s(%s)::%s]", kagReq.Requester.Profile.Hashable(), kagReq.Requester.Signature, kagReq.RequesterKaKey)
 }
 
 func (kagReq *KeyAgreementRequest) Sign(key *crypton.SigningKey) (err error) {
