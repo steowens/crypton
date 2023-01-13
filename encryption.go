@@ -19,8 +19,12 @@ Copyright (C) 2023 Stephen Owens
 package crypton
 
 import (
+	"bytes"
 	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
+	"fmt"
+	"io"
 	"log"
 	"math/big"
 
@@ -34,6 +38,7 @@ var myCrypton = Crypton{}
 
 type PasswordEncryptedValue struct {
 	Salt       []byte
+	IV         []byte
 	CipherText []byte
 }
 
@@ -46,13 +51,15 @@ func (c *Crypton) EncryptWithPassword(password string, plainTextBytes []byte) (*
 	}
 	bPass := []byte(password)
 	aesKey := argon2.Key(bPass, salt, 2, 64, 1, 32)
-	cipherText, err := encryptAES(aesKey, plainTextBytes)
-	if err != nil {
+	cipherText := make([]byte, len(plainTextBytes))
+	iv, err := encryptAES(aesKey, plainTextBytes, cipherText)
+	if err != nil && err != io.EOF {
 		log.Fatal(err)
 		return nil, err
 	}
 	return &PasswordEncryptedValue{
 		Salt:       salt,
+		IV:         iv,
 		CipherText: cipherText,
 	}, nil
 }
@@ -60,37 +67,8 @@ func (c *Crypton) EncryptWithPassword(password string, plainTextBytes []byte) (*
 func (c *Crypton) DecryptWithPassword(password string, value *PasswordEncryptedValue) (plainTextBytes []byte, err error) {
 	bPass := []byte(password)
 	aesKey := argon2.Key(bPass, value.Salt, 2, 64, 1, 32)
-	plainTextBytes, err = decryptAES(aesKey, value.CipherText)
-	return nil, nil
-}
-
-func encryptAES(key []byte, plainTextBytes []byte) (cipherText []byte, err error) {
-	// create cipher
-	c, err := aes.NewCipher(key)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-
-	// allocate space for ciphered data
-	cipherText = make([]byte, len(plainTextBytes))
-
-	// encrypt
-	c.Encrypt(cipherText, plainTextBytes)
-	return
-}
-
-func decryptAES(key []byte, ciphertext []byte) (plainTextBytes []byte, err error) {
-	ct := ciphertext
-
-	cipher, err := aes.NewCipher(key)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-
-	plainTextBytes = make([]byte, len(ciphertext))
-	cipher.Decrypt(plainTextBytes, ct)
+	plainTextBytes = make([]byte, len(value.CipherText))
+	err = decryptAES(aesKey, value.IV, value.CipherText, plainTextBytes)
 	return
 }
 
@@ -142,4 +120,143 @@ func (c *Crypton) DeformatPassword(input string) string {
 		}
 	}
 	return string(bResult)
+}
+
+func maxOrEnd(start int, max int, buffer []byte) (readCount int) {
+	n := len(buffer) - start
+	if max < n {
+		readCount = max
+	} else {
+		readCount = n
+	}
+	return
+}
+
+// using the given key, take the plaintext and encrypt it into
+// the cipherText buffer.
+func encryptAES(key []byte, plainText []byte, cipherText []byte) (iv []byte, err error) {
+	if len(cipherText) != len(plainText) {
+		err = fmt.Errorf("The plainText and cipherText buffers are not the same length")
+		return
+	}
+	plainTextReader := bytes.NewReader(plainText)
+	encryptionStream, err := NewAESEncryptionStream(key, plainTextReader)
+	if err != nil {
+		return
+	}
+	consumed := 0
+	max := 512
+	toRead := maxOrEnd(consumed, max, cipherText)
+	n, err := encryptionStream.Read(cipherText[consumed:toRead])
+	for ; err == nil; n, err = encryptionStream.Read(cipherText[consumed:toRead]) {
+		toRead = maxOrEnd(consumed, max, cipherText)
+		consumed += n
+	}
+	iv = encryptionStream.IV
+	if err == io.EOF {
+		err = nil
+	}
+	return
+}
+
+type AESEncryptionStream struct {
+	IV           []byte
+	key          []byte
+	plainText    io.Reader
+	blockCipher  cipher.Block
+	streamCipher cipher.Stream
+}
+
+func (stream *AESEncryptionStream) Read(chunk []byte) (n int, err error) {
+	// Reads plaintext from the input stream into chunk
+	n, err = stream.plainText.Read(chunk)
+	if n > 0 {
+		// Encrypts the bytes read into chunk
+		stream.streamCipher.XORKeyStream(chunk[:n], chunk[:n])
+	}
+	return
+}
+
+func NewAESEncryptionStream(key []byte, plainTextReader io.Reader) (stream *AESEncryptionStream, err error) {
+	// create cipher
+	blockCipher, err := aes.NewCipher(key)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	iv := make([]byte, blockCipher.BlockSize())
+	_, err = rand.Read(iv)
+	if err != nil {
+		return
+	}
+
+	streamCipher := cipher.NewCTR(blockCipher, iv)
+
+	stream = &AESEncryptionStream{
+		IV:           iv,
+		key:          key,
+		plainText:    plainTextReader,
+		blockCipher:  blockCipher,
+		streamCipher: streamCipher,
+	}
+	return
+}
+
+func decryptAES(key []byte, iv []byte, cipherText []byte, plainText []byte) (err error) {
+	if len(cipherText) != len(plainText) {
+		err = fmt.Errorf("The plainText and cipherText buffers are not the same length")
+		return
+	}
+	cipherTextReader := bytes.NewReader(cipherText)
+	decryptionStream, err := NewAESDecryptionStream(key, iv, cipherTextReader)
+	if err != nil {
+		return
+	}
+	consumed := 0
+	max := 512
+	toRead := maxOrEnd(consumed, max, plainText)
+	n, err := decryptionStream.Read(plainText[consumed:toRead])
+	for ; err == nil; n, err = decryptionStream.Read(plainText[consumed:toRead]) {
+		toRead = maxOrEnd(consumed, max, cipherText)
+		consumed += n
+	}
+	if err == io.EOF {
+		err = nil
+	}
+	return
+}
+
+type AESDecrptionStream struct {
+	IV           []byte
+	key          []byte
+	cipherText   io.Reader
+	blockCipher  cipher.Block
+	streamCipher cipher.Stream
+}
+
+func (stream *AESDecrptionStream) Read(chunk []byte) (n int, err error) {
+	// Reads ciphertext from stream into chunk
+	n, err = stream.cipherText.Read(chunk)
+	if n > 0 {
+		// Does an in-place decryption on the ciphertext in chunk
+		stream.streamCipher.XORKeyStream(chunk[:n], chunk[:n])
+	}
+	return
+}
+
+func NewAESDecryptionStream(key []byte, iv []byte, cipherTextReader io.Reader) (stream *AESDecrptionStream, err error) {
+	blockCipher, err := aes.NewCipher(key)
+	if err != nil {
+		return
+	}
+	streamCipher := cipher.NewCTR(blockCipher, iv)
+	stream = &AESDecrptionStream{
+		IV:           iv,
+		key:          key,
+		cipherText:   cipherTextReader,
+		blockCipher:  blockCipher,
+		streamCipher: streamCipher,
+	}
+	return
 }
