@@ -35,6 +35,7 @@ type Crypton struct {
 }
 
 var myCrypton = Crypton{}
+var pwAlphabet []byte
 
 type PasswordEncryptedValue struct {
 	Salt       []byte
@@ -72,28 +73,42 @@ func (c *Crypton) DecryptWithPassword(password string, value *PasswordEncryptedV
 	return
 }
 
-func (c *Crypton) GeneratePassword() (string, error) {
-	alphabet := make([]byte, 0, 34)
+func makeAlphabet() []byte {
+	alphabet := make([]byte, 0, 26+26+8)
 	var ch byte
 	for ch = 'A'; ch <= 'Z'; ch++ {
+		alphabet = append(alphabet, ch)
+	}
+	for ch = 'a'; ch <= 'z'; ch++ {
 		alphabet = append(alphabet, ch)
 	}
 	for ch = '2'; ch <= '9'; ch++ {
 		alphabet = append(alphabet, ch)
 	}
+	return alphabet
+}
 
-	passwdCh := make([]byte, 25)
-	for i := 0; i < 5; i++ {
-		for j := 0; j < 5; j++ {
-			r, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+func (c *Crypton) GeneratePassword(quartets int) (string, error) {
+	if pwAlphabet == nil {
+		pwAlphabet = makeAlphabet()
+	}
+	bufferLen := (4 * quartets) + quartets + 1
+	passwdCh := make([]byte, bufferLen)
+	x := 0
+	for i := 0; i < quartets; i++ {
+		for j := 0; j < 4; j++ {
+			r, err := rand.Int(rand.Reader, big.NewInt(int64(len(pwAlphabet))))
 			if err != nil {
 				log.Fatal(err)
 				return "", err
 			}
-			passwdCh = append(passwdCh, alphabet[r.Int64()])
+			passwdCh[x] = pwAlphabet[r.Int64()]
+			x++
 		}
+		passwdCh[x] = '-'
+		x++
 	}
-	return string(passwdCh), nil
+	return string(passwdCh[:x-1]), nil
 }
 
 // Inserts ' ' in password every 5 characters for readability
